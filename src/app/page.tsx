@@ -1,101 +1,130 @@
-import Image from "next/image";
+"use client";
+import { useEffect, useState } from "react";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+
+import {
+  Keypair,
+  LAMPORTS_PER_SOL,
+  SystemProgram,
+  Transaction,
+} from "@solana/web3.js";
+
+import {
+  MINT_SIZE,
+  TOKEN_PROGRAM_ID,
+  getMinimumBalanceForRentExemptMint,
+  createInitializeMintInstruction,
+} from "@solana/spl-token";
+import Link from "next/link";
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+  const { connection } = useConnection();
+  const { publicKey, sendTransaction } = useWallet();
+  const [txSig, setTxSig] = useState<string | null>(null)
+  const [balance, setBalance] = useState(0);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+  useEffect(() => {
+    async function getUserBalance() {
+      if (!publicKey) {
+        console.log("no pub key");
+        return;
+      }
+      try {
+        const balanceLamports = await connection.getBalance(publicKey);
+        const balanceSol = balanceLamports / LAMPORTS_PER_SOL;
+        setBalance(balanceSol);
+      } catch (error) {
+        console.error("Error fetching balance:", error);
+      }
+    }
+    getUserBalance();
+  }, [connection, publicKey]);
+
+  const link = () => {
+    return txSig ? `https://explorer.solana.com/tx/${txSig}?cluster=devnet` : ''
+  }
+
+  const createMint = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!connection || !publicKey) {
+      console.error('Connect your wallet!')
+      return
+    }
+
+    const mint = new Keypair()
+    const decimals = 3
+    const lamports = await getMinimumBalanceForRentExemptMint(connection)
+
+    const ix = SystemProgram.createAccount({
+      fromPubkey: publicKey,
+      lamports,
+      newAccountPubkey: mint.publicKey,
+      programId: TOKEN_PROGRAM_ID,
+      space: MINT_SIZE
+    })
+
+    const ixCreateMint = createInitializeMintInstruction(mint.publicKey, decimals, publicKey, publicKey)
+    const tx = new Transaction()
+    tx.add(ix)
+    tx.add(ixCreateMint)
+
+    const sigx = await sendTransaction(tx, connection, {
+      signers: [mint]
+    })
+    console.log('Successfull, this is the sigx', sigx)
+    setTxSig(sigx)
+    console.log(txSig)
+  }
+
+  return (
+    <main className="flex items-center justify-center min-h-screen">
+      <div className="rounded p-6 text-center">
+        <h1 className="text-3xl font-bold mb-4">
+          {publicKey
+            ? `SOL Balance: ${balance !== null ? `${balance} SOL ` : "Loading..."}`
+            : "Connect Your Wallet"}
+        </h1>
+        <form onSubmit={createMint}>
+          <button
+            // onClick={mintToken}
+            // disabled={!walletAddress || loading}
+            type="submit"
+            className={`w-1/2 py-2 rounded text-white bg-green-500 hover:bg-green-600 mb-6`}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+            {"Create Mint"}
+          </button>
+        </form>
+        {txSig && <div className="mt-6 text-left mb-10">
+          <p className="text-gray-300 mb-2">
+            <strong>Token Mint Address: </strong>{txSig}
+          </p>
+          <p className="text-gray-300 mb-2">
+            <strong>View your transaction on:</strong>
+          </p>
+          <p className="text-blue-500 underline">
+            <Link
+              href={link()}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Solana Explorer Link
+            </Link>
+          </p>
+        </div>}
+        <div className="w-full max-w-sm">
+          <label className="block text-gray-300 text-1xl font-bold mb-2" htmlFor="amount">
+            Token Mint
+          </label>
+          <input
+            id="amount"
+            type="text"
+            placeholder="Enter amount"
+            // value={mintAmount}
+            // onChange={(e) => setMintAmount(e.target.value)}
+            className="w-full px-4 py-2 mb-4 border border-gray-700 rounded bg-gray-800 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+      </div>
+    </main>
   );
 }
